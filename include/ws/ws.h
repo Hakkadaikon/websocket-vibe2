@@ -38,6 +38,7 @@ typedef struct {
     uint8_t mask_key[4];
     _Bool fin;
     _Bool masked;
+    uint8_t rsv; // RSV1|RSV2|RSV3 as bits 2..0 (RFC §5.2); must be 0 without extensions
 } ws_frame_header;
 
 // Parse a frame header from `buf` (len bytes available). Returns the header

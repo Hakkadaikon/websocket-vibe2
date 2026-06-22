@@ -69,12 +69,23 @@ static uint64_t raw_len(const uint8_t *buf, size_t ext) {
     return read_be(buf + 2, ext);
 }
 
-// RFC §5.2: the 64-bit length form must have its most significant bit clear.
-static _Bool len_ok(size_t ext, uint64_t v) {
-    if (ext < 8) {
-        return true;
+// RFC §5.2: the length must use the shortest form, and the 64-bit form must
+// have its MSB clear. 126 (16-bit) is only legal for 126..65535; 127 (64-bit)
+// only for >= 65536, MSB clear. Non-minimal encodings are a protocol error.
+static _Bool len64_ok(uint64_t v) {
+    if ((v >> 63) != 0U) {
+        return false; // MSB must be clear
     }
-    return (_Bool)((v >> 63) == 0U);
+    return (_Bool)(v > 0xFFFFU); // must not encode a value that fits the 16-bit form
+}
+static _Bool len_ok(size_t ext, uint64_t v) {
+    if (ext == 0) {
+        return true; // 7-bit immediate (0..125) is always minimal
+    }
+    if (ext == 2) {
+        return (_Bool)(v >= 126); // 16-bit form must not encode < 126
+    }
+    return len64_ok(v);
 }
 
 // Decode the length field at buf[1]. Sets *len and *hdr (bytes before the mask
@@ -97,9 +108,15 @@ static _Bool control_too_big(ws_opcode op, uint64_t plen) {
     return (_Bool)(ws_classify_opcode((uint8_t)op) == WS_CLASS_CONTROL && plen > 125);
 }
 
+// RFC §5.5: control frames must not be fragmented (FIN must be 1).
+static _Bool control_fragmented(ws_opcode op, _Bool fin) {
+    return (_Bool)(ws_classify_opcode((uint8_t)op) == WS_CLASS_CONTROL && !fin);
+}
+
 // Fill the fixed fields from the first two bytes and the decoded length.
 static void fill_fields(const uint8_t *buf, uint64_t plen, ws_frame_header *out) {
     out->fin = (_Bool)((buf[0] & 0x80) != 0);
+    out->rsv = (uint8_t)((buf[0] >> 4) & 0x07); // RFC §5.2: RSV1|RSV2|RSV3
     out->opcode = (ws_opcode)(buf[0] & 0x0F);
     out->masked = (_Bool)((buf[1] & 0x80) != 0);
     out->payload_len = plen;
@@ -117,9 +134,21 @@ static int parse_mask(const uint8_t *buf, size_t len, size_t hdr, ws_frame_heade
     return (int)(hdr + 4);
 }
 
+// RFC §5.2/§5.5 header well-formedness: no RSV bits, control frames small and
+// unfragmented. (Length minimality is checked earlier in decode_len.)
+static _Bool header_well_formed(const ws_frame_header *h) {
+    if (h->rsv != 0) {
+        return false; // §5.2: RSV set without a negotiated extension
+    }
+    if (control_too_big(h->opcode, h->payload_len)) {
+        return false; // §5.5: control payload > 125
+    }
+    return (_Bool)!control_fragmented(h->opcode, h->fin); // §5.5: fragmented control
+}
+
 // Validate the decoded frame and read the mask key. Returns header bytes or err.
 static int finish_parse(const uint8_t *buf, size_t len, size_t hdr, ws_frame_header *out) {
-    if (control_too_big(out->opcode, out->payload_len)) {
+    if (!header_well_formed(out)) {
         return WS_ERR_PROTOCOL;
     }
     return parse_mask(buf, len, hdr, out);

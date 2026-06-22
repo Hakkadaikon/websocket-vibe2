@@ -74,6 +74,35 @@ static void test_parse_errors(void) {
     CHECK(ws_parse_header(msb, 10, &h) == WS_ERR_PROTOCOL, "127 MSB set rejected");
 }
 
+// RFC §5.2/§5.5 validation added on top of the verified core.
+static void test_parse_rfc_validation(void) {
+    ws_frame_header h;
+
+    // RSV bits set without a negotiated extension -> protocol error (§5.2).
+    const uint8_t rsv1[] = {0xC1, 0x05}; // FIN + RSV1 + TEXT
+    const uint8_t rsv2[] = {0xA1, 0x05}; // FIN + RSV2 + TEXT
+    const uint8_t rsv3[] = {0x91, 0x05}; // FIN + RSV3 + TEXT
+    CHECK(ws_parse_header(rsv1, 2, &h) == WS_ERR_PROTOCOL, "RSV1 set rejected (§5.2)");
+    CHECK(ws_parse_header(rsv2, 2, &h) == WS_ERR_PROTOCOL, "RSV2 set rejected (§5.2)");
+    CHECK(ws_parse_header(rsv3, 2, &h) == WS_ERR_PROTOCOL, "RSV3 set rejected (§5.2)");
+
+    // Non-minimal length encodings -> protocol error (§5.2).
+    const uint8_t nonmin16[] = {0x81, 126, 0x00, 0x05}; // len 5 in 16-bit form
+    CHECK(ws_parse_header(nonmin16, 4, &h) == WS_ERR_PROTOCOL, "non-minimal 16-bit len rejected");
+    const uint8_t nonmin64[] = {0x81, 127, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF}; // 0xFFFF in 64-bit form
+    CHECK(ws_parse_header(nonmin64, 10, &h) == WS_ERR_PROTOCOL, "non-minimal 64-bit len rejected");
+    // Minimal boundaries stay legal.
+    const uint8_t min16[] = {0x81, 126, 0x00, 0x7E}; // 126, smallest legal 16-bit
+    CHECK(ws_parse_header(min16, 4, &h) == 4, "minimal 16-bit len 126 ok");
+    const uint8_t min64[] = {0x81, 127, 0, 0, 0, 0, 0, 1, 0, 0}; // 0x10000, smallest 64-bit
+    CHECK(ws_parse_header(min64, 10, &h) == 10, "minimal 64-bit len 0x10000 ok");
+
+    // Fragmented control frame (FIN=0) -> protocol error (§5.5).
+    const uint8_t fragclose[] = {0x08, 0x00}; // CLOSE, FIN=0
+    CHECK(ws_parse_header(fragclose, 2, &h) == WS_ERR_PROTOCOL,
+          "fragmented control rejected (§5.5)");
+}
+
 // The masked tiny frame parsed back keeps its mask flag and key bytes.
 static _Bool masked_key_ok(const ws_frame_header *r) {
     if (!r->masked) {
