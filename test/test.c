@@ -46,7 +46,106 @@ static void test_mask(void) {
     CHECK(guard[0] == (0xAA ^ 0x37), "mask len 0 is a no-op");
 }
 
+// ---- frame: classify (Lean P5) ----
+static void test_classify(void) {
+    CHECK(ws_classify_opcode(0x0) == WS_CLASS_DATA, "0x0 cont = data (P5)");
+    CHECK(ws_classify_opcode(0x1) == WS_CLASS_DATA, "0x1 text = data (P5)");
+    CHECK(ws_classify_opcode(0x2) == WS_CLASS_DATA, "0x2 bin = data (P5)");
+    CHECK(ws_classify_opcode(0x8) == WS_CLASS_CONTROL, "0x8 close = control (P5)");
+    CHECK(ws_classify_opcode(0x9) == WS_CLASS_CONTROL, "0x9 ping = control (P5)");
+    CHECK(ws_classify_opcode(0xA) == WS_CLASS_CONTROL, "0xA pong = control (P5)");
+    CHECK(ws_classify_opcode(0x3) == WS_CLASS_RESERVED, "0x3 = reserved (P5)");
+    CHECK(ws_classify_opcode(0xB) == WS_CLASS_RESERVED, "0xB = reserved (P5)");
+    CHECK(ws_classify_opcode(0xF) == WS_CLASS_RESERVED, "0xF = reserved (P5)");
+}
+
+// ---- frame: parse_header (RFC 6455 5.2; P3/P4 lengths, P6 control) ----
+static void test_parse_header(void) {
+    ws_frame_header h;
+
+    // tiny, FIN text, unmasked, len 5 -> 2 header bytes.
+    const uint8_t tiny[] = {0x81, 0x05};
+    CHECK(ws_parse_header(tiny, 2, &h) == 2, "tiny unmasked header = 2 bytes");
+    CHECK(h.fin && h.opcode == WS_OP_TEXT && !h.masked && h.payload_len == 5, "tiny fields");
+
+    // masked tiny -> 6 header bytes, mask key read.
+    const uint8_t masked[] = {0x82, 0x83, 0x01, 0x02, 0x03, 0x04};
+    CHECK(ws_parse_header(masked, 6, &h) == 6, "masked tiny header = 6 bytes");
+    CHECK(h.masked && h.payload_len == 3 && h.opcode == WS_OP_BIN, "masked fields");
+    CHECK(h.mask_key[0] == 1 && h.mask_key[3] == 4, "mask key read");
+
+    // 126 form: len 200 -> 4 header bytes.
+    const uint8_t s[] = {0x81, 126, 0x00, 0xC8};
+    CHECK(ws_parse_header(s, 4, &h) == 4, "short header = 4 bytes");
+    CHECK(h.payload_len == 200, "short len 200");
+
+    // 127 form: len 0x10000 -> 10 header bytes.
+    const uint8_t l[] = {0x82, 127, 0, 0, 0, 0, 0, 1, 0, 0};
+    CHECK(ws_parse_header(l, 10, &h) == 10, "long header = 10 bytes");
+    CHECK(h.payload_len == 0x10000, "long len 0x10000");
+
+    // need more bytes.
+    CHECK(ws_parse_header(tiny, 1, &h) == WS_ERR_NEED_MORE, "1 byte = need more");
+    CHECK(ws_parse_header(s, 3, &h) == WS_ERR_NEED_MORE, "short missing len = need more");
+
+    // P6: control opcode (close) with payload > 125 must be rejected.
+    const uint8_t bigctl[] = {0x88, 126, 0x00, 0xC8};
+    CHECK(ws_parse_header(bigctl, 4, &h) == WS_ERR_PROTOCOL, "control >125 rejected (P6)");
+    // control exactly 125 ok.
+    const uint8_t okctl[] = {0x88, 125};
+    CHECK(ws_parse_header(okctl, 2, &h) == 2, "control =125 ok (P6)");
+
+    // 127 form with MSB set is illegal (RFC 5.2).
+    const uint8_t msb[] = {0x82, 127, 0x80, 0, 0, 0, 0, 0, 0, 0};
+    CHECK(ws_parse_header(msb, 10, &h) == WS_ERR_PROTOCOL, "127 MSB set rejected");
+}
+
+// ---- frame: build_header + roundtrip (Lean P3/P4) ----
+static void test_build_header(void) {
+    uint8_t buf[14];
+    ws_frame_header h = {0};
+    ws_frame_header r;
+
+    // tiny boundary 125 -> 2 bytes.
+    h.fin = 1;
+    h.opcode = WS_OP_TEXT;
+    h.payload_len = 125;
+    CHECK(ws_build_header(&h, buf, sizeof buf) == 2, "build tiny 125 = 2 bytes");
+    CHECK(ws_parse_header(buf, 2, &r) == 2 && r.payload_len == 125, "roundtrip 125");
+
+    // 126 boundary -> short form, 4 bytes.
+    h.payload_len = 126;
+    CHECK(ws_build_header(&h, buf, sizeof buf) == 4, "build 126 = short 4 bytes");
+    CHECK(ws_parse_header(buf, 4, &r) == 4 && r.payload_len == 126, "roundtrip 126");
+
+    // 0xFFFF boundary -> short form.
+    h.payload_len = 0xFFFF;
+    CHECK(ws_build_header(&h, buf, sizeof buf) == 4, "build 0xFFFF = short 4 bytes");
+    CHECK(ws_parse_header(buf, 4, &r) == 4 && r.payload_len == 0xFFFF, "roundtrip 0xFFFF");
+
+    // 0x10000 -> long form, 10 bytes.
+    h.payload_len = 0x10000;
+    CHECK(ws_build_header(&h, buf, sizeof buf) == 10, "build 0x10000 = long 10 bytes");
+    CHECK(ws_parse_header(buf, 10, &r) == 10 && r.payload_len == 0x10000, "roundtrip 0x10000");
+
+    // masked build -> +4 bytes, key preserved.
+    h.payload_len = 5;
+    h.masked = 1;
+    h.mask_key[0] = 0xDE;
+    h.mask_key[3] = 0xEF;
+    CHECK(ws_build_header(&h, buf, sizeof buf) == 6, "build masked tiny = 6 bytes");
+    CHECK(ws_parse_header(buf, 6, &r) == 6 && r.masked && r.mask_key[0] == 0xDE &&
+              r.mask_key[3] == 0xEF,
+          "roundtrip masked key");
+
+    // too small.
+    CHECK(ws_build_header(&h, buf, 1) == WS_ERR_TOO_SMALL, "build cap too small");
+}
+
 void run_tests(void) {
     test_mem();
     test_mask();
+    test_classify();
+    test_parse_header();
+    test_build_header();
 }
