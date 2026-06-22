@@ -3,7 +3,7 @@
 cc := "clang"
 # freestanding: no libc, no hosted runtime. -O2 for realistic bench.
 cflags := "-std=c23 -ffreestanding -nostdlib -fno-builtin -Wall -Wextra -Werror -O2 -Iinclude"
-srcs := "src/mem.c src/mask.c src/frame.c src/handshake.c src/sha1.c src/base64.c src/utf8.c src/lifecycle.c"
+srcs := "src/mem.c src/mask.c src/frame.c src/handshake.c src/sha1.c src/base64.c src/utf8.c src/lifecycle.c src/stream.c"
 
 default: check
 

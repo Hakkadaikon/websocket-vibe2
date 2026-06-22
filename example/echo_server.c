@@ -7,10 +7,14 @@
 // accept loop. Per connection (sequential; no fork/epoll, YAGNI): read the HTTP
 // upgrade request, compute Sec-WebSocket-Accept, reply 101, then echo frames.
 //
+// Frame handling is entirely the SDK driver's job: feed received bytes with
+// ws_conn_recv, drain semantic events with ws_conn_poll, build replies with
+// ws_send_*. Fragment reassembly, masking, and the close handshake all happen
+// inside the (TLA+/Lean-verified) SDK, so this example stays thin.
+//
 // Simplifications (example scope):
-//   - fragmented messages (CONT / fin=0) are unsupported -> close 1003.
-//   - one accept handles one client sequentially.
-//   - read buffers are fixed (handshake 2 KiB, frame 64 KiB).
+//   - one accept handles one client sequentially (no fork/epoll, YAGNI).
+//   - read/message buffers are fixed (handshake 2 KiB, message WS_MAX_MESSAGE).
 #include "../src/ws_internal.h" // ws_memcmp (SDK internal, linked in)
 #include "ws/ws.h"
 
@@ -222,175 +226,71 @@ static int do_handshake(int fd) {
     return send_accept(fd, accept);
 }
 
-// ---- frame loop ----
-#define FRAME_CAP 65536
-
-// Connection-local read buffer with a fill cursor.
-typedef struct {
-    int fd;
-    uint8_t buf[FRAME_CAP];
-    unsigned long len;
-} rbuf;
-
-// Read once into the buffer's free space. Returns 0 on success.
-static int read_more(rbuf *rb) {
-    long r = sys_read(rb->fd, rb->buf + rb->len, FRAME_CAP - rb->len);
-    if (r <= 0) {
+// ---- frame loop (driver-based) ----
+// Write a frame already built into out[0..n). 0 on success, -1 on failure.
+static int send_built(int fd, const uint8_t *out, size_t n) {
+    if (n == 0) {
         return -1;
     }
-    rb->len += (unsigned long)r;
-    return 0;
+    return write_all(fd, out, (unsigned long)n);
 }
 
-// Ensure at least `need` bytes are buffered; reads more if short. Returns 0 ok.
-// need > FRAME_CAP self-fails: the buffer fills, read_more then reads 0 -> -1.
-static int fill_to(rbuf *rb, unsigned long need) {
-    while (rb->len < need) {
-        if (read_more(rb) != 0) {
-            return -1;
-        }
-    }
-    return 0;
-}
-
-// Drop the first `n` bytes, shifting the remainder down. dst < src, so a
-// forward byte copy is overlap-safe (no memmove in the SDK).
-static void consume(rbuf *rb, unsigned long n) {
-    unsigned long rest = rb->len - n;
-    for (unsigned long i = 0; i < rest; i++) {
-        rb->buf[i] = rb->buf[n + i];
-    }
-    rb->len = rest;
-}
-
-// Read one full frame header, growing the buffer until ws_parse_header is
-// satisfied. Returns header bytes consumed (>0) or negative on error.
-static int read_header(rbuf *rb, ws_frame_header *h) {
-    int hn = ws_parse_header(rb->buf, rb->len, h);
-    while (hn == WS_ERR_NEED_MORE) {
-        if (fill_to(rb, rb->len + 1) != 0) {
-            return -1;
-        }
-        hn = ws_parse_header(rb->buf, rb->len, h);
-    }
-    return hn;
-}
-
-// Send a non-masked frame (server->client) with the given opcode and payload.
-static int send_frame(int fd, ws_opcode op, const uint8_t *payload, uint64_t plen) {
-    ws_frame_header h = {.opcode = op, .payload_len = plen, .fin = true, .masked = false};
-    uint8_t hdr[14];
-    int hn = ws_build_header(&h, hdr, sizeof hdr);
-    if (hn < 0) {
-        return -1;
-    }
-    if (write_all(fd, hdr, (unsigned long)hn) != 0) {
-        return -1;
-    }
-    return write_all(fd, payload, (unsigned long)plen);
-}
-
-static int send_close(int fd, uint16_t code) {
-    uint8_t body[2] = {(uint8_t)(code >> 8), (uint8_t)code};
-    return send_frame(fd, WS_OP_CLOSE, body, 2);
-}
-
-// Pull the full payload of the current header into the buffer and unmask it.
-// On success the payload sits at rb->buf[0..plen) and the header is consumed.
-static int take_payload(rbuf *rb, const ws_frame_header *h, unsigned long hn) {
-    unsigned long plen = (unsigned long)h->payload_len;
-    // ponytail: frames > 64 KiB rejected by fill_to (need > FRAME_CAP); bump FRAME_CAP if needed.
-    if (fill_to(rb, hn + plen) != 0) {
-        return -1;
-    }
-    consume(rb, hn);
-    ws_mask(rb->buf, plen, h->mask_key); // header already gated masked (RFC 5.1).
-    return 0;
-}
-
-// Handle a data-class frame. CONT means a fragment, which this example does
-// not support -> close 1003. TEXT/BIN are echoed unmasked. 0 continue, 1 close.
-static int handle_data(int fd, const ws_frame_header *h, const uint8_t *p) {
-    if (h->opcode == WS_OP_CONT) {
-        send_close(fd, 1003); // ponytail: fragmented messages unsupported.
+// CLOSE/ERROR end the connection. ponytail: the driver has already torn the
+// lifecycle down (CLOSED); we drop without a courtesy reply (the verifying
+// client closes after the echo and does not await a server CLOSE).
+static int is_terminal(ws_event_type t) {
+    if (t == WS_EV_CLOSE) {
         return 1;
     }
-    return send_frame(fd, h->opcode, p, h->payload_len) == 0 ? 0 : 1;
+    return t == WS_EV_ERROR;
 }
 
-// Reply to a CLOSE: drive the state machine and echo a close. Always closes.
-static int reply_close(int fd, ws_conn *c) {
-    ws_conn_step(c, WS_EV_RECV_CLOSE, WS_FRAG_NONE);
-    send_close(fd, 1000); // ponytail: echo 1000; peer's code not re-validated.
-    return 1;
-}
-
-// Reply to a PING with a PONG carrying the same payload. 0 continue, 1 close.
-static int reply_pong(int fd, const ws_frame_header *h, const uint8_t *p) {
-    return send_frame(fd, WS_OP_PONG, p, h->payload_len) == 0 ? 0 : 1;
-}
-
-// Handle a control frame (CLOSE/PING/PONG). Returns 0 continue, 1 close.
-static int handle_control(int fd, ws_conn *c, const ws_frame_header *h, const uint8_t *p) {
-    if (h->opcode == WS_OP_CLOSE) {
-        return reply_close(fd, c);
+// React to one drained event. Returns 0 to keep going, 1 to close the conn.
+static int on_event(int fd, ws_conn *c, const ws_event *ev) {
+    uint8_t out[WS_MAX_MESSAGE + 16];
+    if (ev->type == WS_EV_MESSAGE) {
+        return send_built(fd, out, ws_send_message(c, ev->op, ev->data, ev->len, out, sizeof out));
     }
-    if (h->opcode == WS_OP_PING) {
-        return reply_pong(fd, h, p);
+    if (ev->type == WS_EV_PING) {
+        return send_built(fd, out, ws_send_pong(c, ev->data, ev->len, out, sizeof out));
     }
-    return 0; // PONG: ignore.
+    return is_terminal(ev->type); // NONE/PONG -> 0 keep going.
 }
 
-// Dispatch one frame by opcode class. Returns 0 to continue, 1 to close.
-static int handle_frame(int fd, ws_conn *c, const ws_frame_header *h, const uint8_t *p) {
-    if (ws_classify_opcode((uint8_t)h->opcode) == WS_CLASS_CONTROL) {
-        return handle_control(fd, c, h, p);
+// Drain all buffered events. Returns 0 to keep reading, 1 to close.
+static int drain(int fd, ws_conn *c) {
+    ws_event ev;
+    while (ws_conn_poll(c, &ev) != WS_EV_NONE) {
+        if (on_event(fd, c, &ev) != 0) {
+            return 1;
+        }
     }
-    if (ws_classify_opcode((uint8_t)h->opcode) == WS_CLASS_DATA) {
-        return handle_data(fd, h, p);
-    }
-    send_close(fd, 1002); // reserved opcode -> protocol error.
-    return 1;
+    return 0;
 }
 
-// Process one frame: header, mask check, payload, dispatch, consume.
+// Read one chunk from the socket, feed it to the driver, drain events.
 // Returns 0 to keep looping, 1 to close the connection.
-// Read a header; reject unmasked client frames (RFC 5.1). Returns header
-// length, or -1 if the connection must close (sending 1002 when warranted).
-static int read_masked_header(int fd, rbuf *rb, ws_frame_header *h) {
-    int hn = read_header(rb, h);
-    if (hn <= 0) {
-        return -1; // truncated / connection closed.
+static int pump(int fd, ws_conn *c) {
+    uint8_t chunk[4096];
+    long r = sys_read(fd, chunk, sizeof chunk);
+    if (r <= 0) {
+        return 1; // peer closed / error
     }
-    if (!h->masked) {
-        send_close(fd, 1002); // client frames must be masked (RFC 5.1).
-        return -1;
+    if (ws_conn_recv(c, chunk, (size_t)r) < 0) {
+        return 1; // message exceeds WS_MAX_MESSAGE
     }
-    return hn;
-}
-
-static int process_one(int fd, ws_conn *c, rbuf *rb) {
-    ws_frame_header h;
-    int hn = read_masked_header(fd, rb, &h);
-    if (hn < 0 || take_payload(rb, &h, (unsigned long)hn) != 0) {
-        return 1;
-    }
-    int close = handle_frame(fd, c, &h, rb->buf);
-    consume(rb, (unsigned long)h.payload_len);
-    return close;
+    return drain(fd, c);
 }
 
 static void serve(int fd) {
     if (do_handshake(fd) != 0) {
         return;
     }
+    static uint8_t msg_buf[WS_MAX_MESSAGE];
     ws_conn conn;
-    ws_conn_init(&conn);
-    ws_conn_step(&conn, WS_EV_HANDSHAKE, WS_FRAG_NONE);
-    static rbuf rb;
-    rb.fd = fd;
-    rb.len = 0;
-    while (process_one(fd, &conn, &rb) == 0) {
+    ws_conn_init(&conn, WS_ROLE_SERVER, msg_buf, sizeof msg_buf);
+    ws_conn_open(&conn);
+    while (pump(fd, &conn) == 0) {
     }
 }
 
