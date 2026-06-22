@@ -26,4 +26,16 @@
 - [ ] S12. CCN≤3 / clang-tidy / clang-format 全緑、README
 
 ## レビュー欄
-(完了後記入)
+
+全タスク完了。三層検証 + freestanding C23 実装が揃った。
+
+- 設計(TLA+): WsLifecycle, TLC No error / 8 distinct states / INV1-6, mutation oracle 検証済み。
+- 数学的核(Lean 4): P1-P8 全て sorry 無し、標準公理のみ(native_decide 不使用)。
+- 実装(TDD): 橋渡しテストで証明分岐を1対1固定。`i%4`→`i%3` 変異でテストが落ちることを確認(ハーネス健全)。
+- 品質: `just check`(fmt/ccn/lint/test)全緑。CCN 全関数 ≤3。`just verify`(TLA+ + Lean)も緑。
+- bench: rdtsc で mask ~1.4 cycles/byte, parse ~20 cycles/frame。
+
+残課題(YAGNI で今回外した範囲、必要になれば追加):
+- TCP I/O 層・TLS は sans-I/O 設計なので呼び出し側責務(意図的に範囲外)。
+- フレーム payload の UTF-8 ストリーミング検証(フラグメント跨ぎ): 現 ws_utf8_valid は完結列向け。
+- RSV ビット/拡張ネゴシエーションは未対応(RFC 上 extension 無しなら 0)。

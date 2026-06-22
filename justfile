@@ -35,9 +35,17 @@ bench:
     {{cc}} {{cflags}} -static {{srcs}} bench/bench.c -o build/bench
     ./build/bench
 
-# Re-check the Lean proofs and TLA+ design behind the implementation.
+# Re-model-check the TLA+ design (state machine, INV1..INV6).
+verify-design:
+    mkdir -p "${TMPDIR:-/tmp}/tla"
+    cd spec && _JAVA_OPTIONS="-Djava.io.tmpdir=${TMPDIR:-/tmp}/tla" tlc -config WsLifecycle.cfg WsLifecycle.tla
+
+# Re-check the Lean proofs (P1..P8) behind the byte/bit-level code.
 verify-proofs:
     cd proofs/WsProto && lake build
+
+# Both formal layers.
+verify: verify-design verify-proofs
 
 # Everything CI cares about.
 check: fmt ccn lint test

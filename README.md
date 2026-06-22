@@ -53,7 +53,9 @@ nix develop
 | `just fmt` | clang-format の差分チェック |
 | `just ccn` | 循環的複雑度を検査（全関数 CCN ≤ 3） |
 | `just bench` | マスキングとフレーム parse のスループット計測 |
-| `just verify-proofs` | Lean の証明と TLA+ の設計を再検査 |
+| `just verify-design` | TLA+ の状態機械をモデル検査（INV1..INV6） |
+| `just verify-proofs` | Lean の証明 P1..P8 を再検査 |
+| `just verify` | 形式検証の二層（design + proofs）をまとめて実行 |
 | `just check` | fmt/ccn/lint/test を一括実行 |
 
 `just bench` は rdtsc でサイクルを測り、`cycles/byte`（マスキング）と `cycles/frame`（parse）を出力する。
