@@ -88,26 +88,26 @@ typedef enum {
 
 typedef struct {
     ws_event_type type;
-    ws_opcode op;          // for WS_EV_MESSAGE: WS_OP_TEXT or WS_OP_BIN
-    const uint8_t *data;   // payload (into the caller's message buffer)
-    size_t len;            // payload length
-    uint16_t close_code;   // for WS_EV_CLOSE (0 if peer sent none)
+    ws_opcode op;        // for WS_EV_MESSAGE: WS_OP_TEXT or WS_OP_BIN
+    const uint8_t *data; // payload (into the caller's message buffer)
+    size_t len;          // payload length
+    uint16_t close_code; // for WS_EV_CLOSE (0 if peer sent none)
 } ws_event;
 
 // Connection state. Fields are internal — declared here only so the caller can
 // stack-allocate it. Do not read/write them directly; use the functions.
 typedef struct {
     ws_state state;
-    ws_frag frag;          // in-flight message type (WS_FRAG_NONE between msgs)
+    ws_frag frag; // in-flight message type (WS_FRAG_NONE between msgs)
     ws_role role;
     _Bool sent_close;
     _Bool rcvd_close;
-    uint8_t *msg_buf;      // caller-owned: holds reassembled message + scratch
+    uint8_t *msg_buf; // caller-owned: holds reassembled message + scratch
     size_t msg_cap;
-    size_t msg_len;        // bytes of the in-flight message assembled so far
-    size_t rx_len;         // unparsed raw bytes buffered after msg_len
-    uint16_t close_code;   // close code from the peer's CLOSE frame
-    _Bool failed;          // a protocol error latched the connection to ERROR
+    size_t msg_len;      // bytes of the in-flight message assembled so far
+    size_t rx_len;       // unparsed raw bytes buffered after msg_len
+    uint16_t close_code; // close code from the peer's CLOSE frame
+    _Bool failed;        // a protocol error latched the connection to ERROR
 } ws_conn;
 
 // Initialize a server/client connection. msg_buf (msg_cap bytes) is borrowed
@@ -131,8 +131,8 @@ ws_event_type ws_conn_poll(ws_conn *c, ws_event *ev);
 // All return the number of bytes written into out, or 0 on failure (buffer too
 // small, or illegal in the current state). Server frames are unmasked, client
 // frames are masked (RFC 6455 §5.1); the mask key is drawn from `mask_key`.
-size_t ws_send_message(ws_conn *c, ws_opcode op, const uint8_t *payload, size_t len,
-                       uint8_t *out, size_t cap);
+size_t ws_send_message(ws_conn *c, ws_opcode op, const uint8_t *payload, size_t len, uint8_t *out,
+                       size_t cap);
 size_t ws_send_pong(ws_conn *c, const uint8_t *payload, size_t len, uint8_t *out, size_t cap);
 size_t ws_send_close(ws_conn *c, uint16_t code, uint8_t *out, size_t cap);
 
