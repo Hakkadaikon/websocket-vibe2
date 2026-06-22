@@ -28,9 +28,10 @@ fmt:
 fmt-fix:
     clang-format -i src/*.c include/ws/*.h test/*.c bench/*.c example/*.c
 
-# Cyclomatic complexity must stay <= 3.
+# Cyclomatic complexity must stay <= 3 (C sources only; -l cpp skips the
+# Python test client living under example/).
 ccn:
-    lizard -C 3 -w src include example
+    lizard -l cpp -C 3 -w src include example
 
 # Build the echo server example (freestanding, links the SDK).
 example:

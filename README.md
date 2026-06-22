@@ -79,11 +79,41 @@ driver を使わず、フレーム単位で直接扱うこともできる。
 | `ws_handshake_accept` | `Sec-WebSocket-Accept` を計算 | RFC 6455 §4.2 |
 | `ws_utf8_valid` | UTF-8 列を検証 | Lean P8 |
 
+### I/O ランタイム（任意）
+
+プロトコルコアは I/O を持たない。`ws/io.h` はその上に載る**任意の**ランタイムで、
+epoll ベースの TCP サーバ（Linux x86-64、raw syscall、freestanding）を提供する。
+socket/accept/read/write/HTTP ハンドシェイク/複数接続の多重化はすべて中に隠れ、
+利用者はイベントハンドラだけ書けばよい。
+
+```c
+#include "ws/io.h"
+
+static void on_event(ws_io *io, ws_conn *c, const ws_event *ev) {
+    switch (ev->type) {
+    case WS_EV_MESSAGE: ws_io_send_message(io, c, ev->op, ev->data, ev->len); break;
+    case WS_EV_PING:    ws_io_send_pong(io, c, ev->data, ev->len);            break;
+    case WS_EV_CLOSE:   ws_io_send_close(io, c, ev->close_code);              break;
+    default: break;
+    }
+}
+
+void _start(void) { ws_serve(8080, WS_ROLE_SERVER, on_event); }
+```
+
+| 関数 | 役割 |
+|------|------|
+| `ws_serve` | epoll で複数接続を多重化し、ハンドシェイクと driver を駆動 |
+| `ws_io_send_message` / `ws_io_send_pong` / `ws_io_send_close` | ハンドラから接続へ送信 |
+
+プロトコルコアと I/O 層は分離している。epoll を使わず、別の多重化機構・別 OS・組込み環境に
+コアだけ載せ替えることもできる（その場合は driver API を直接回す）。
+
 ## example: echo サーバー
 
-`example/echo_server.c` は freestanding C23・raw syscall（x86-64）で TCP I/O を持つ
-WebSocket echo サーバー。フレーム処理は driver（`ws_conn_recv` / `ws_conn_poll` /
-`ws_send_*`）に委ね、example 側は I/O と HTTP ハンドシェイクだけを持つ。
+`example/echo_server.c` は `ws/io.h` を使った WebSocket echo サーバー。本体は `on_event`
+ハンドラと `ws_serve` 呼び出しだけ（約 40 行）。フレーム処理・I/O・ハンドシェイク・
+複数接続多重化はすべて SDK が持つ。
 
 ```sh
 nix build .#echo-server   # またはサンドボックス内では just example
