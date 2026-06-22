@@ -33,6 +33,7 @@ void run_tests(void) {
     test_classify_reserved();
     test_parse_lengths();
     test_parse_errors();
+    test_parse_rfc_validation();
     test_build_header();
     test_sha1();
     test_base64();
@@ -50,6 +51,10 @@ void run_tests(void) {
     test_drv_fragmented();
     test_drv_ping();
     test_drv_close();
+    test_drv_close_reserved_code();
+    test_drv_close_one_byte();
+    test_drv_close_bad_reason();
+    test_drv_close_empty_and_reason();
     test_drv_interleave();
     test_drv_stray_cont();
     test_drv_too_big();

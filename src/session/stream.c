@@ -124,7 +124,7 @@ static ws_event_type finish_message(ws_conn *c, ws_event *ev) {
     ev->op = (c->frag == WS_FRAG_BIN) ? WS_OP_BIN : WS_OP_TEXT;
     ev->data = c->msg_buf;
     ev->len = c->msg_len;
-    c->frag = WS_FRAG_NONE;
+    (void)ws_lc_finish_frag(c); // WsLifecycle FinishFrag: frag -> NONE (read op above first)
     c->msg_len = 0;
     return emit(ev, WS_EV_MESSAGE);
 }
@@ -157,11 +157,15 @@ static _Bool data_illegal(const ws_conn *c, const ws_frame_header *h, _Bool is_c
 }
 
 // Begin a new data message: set frag from the opcode (S4). CONT keeps frag.
+// Drives the verified lifecycle action (WsLifecycle StartFrag) rather than
+// assigning frag directly, so the TLA+ guard (Active && frag==NONE) is enforced
+// in one place. data_illegal already ruled out interleave, so this succeeds.
 static void begin_data(ws_conn *c, const ws_frame_header *h, _Bool is_cont) {
     if (is_cont) {
         return;
     }
-    c->frag = (h->opcode == WS_OP_BIN) ? WS_FRAG_BIN : WS_FRAG_TEXT;
+    ws_frag type = (h->opcode == WS_OP_BIN) ? WS_FRAG_BIN : WS_FRAG_TEXT;
+    (void)ws_lc_start_frag(c, type);
 }
 
 // A data frame (TEXT/BIN/CONT). Routes S4-S9 on (opcode, frag, fit).
@@ -178,8 +182,35 @@ static ws_event_type on_data(ws_conn *c, const ws_frame_header *h, size_t hdr, w
     return finish_message(c, ev); // S6
 }
 
-// CLOSE: capture the peer's code (if any), drive the lifecycle (R6a), emit (S11).
+// A code+reason close body (plen >= 2): the code must be sendable (§7.4.1) and
+// the reason must be valid UTF-8 (§5.5.1).
+static _Bool close_code_reason_ok(ws_conn *c, size_t hdr, size_t plen) {
+    uint16_t code = (uint16_t)((raw(c)[hdr] << 8) | raw(c)[hdr + 1]);
+    if (!ws_close_code_sendable(code)) {
+        return false; // §7.4.1: reserved/out-of-range code
+    }
+    return ws_utf8_valid(raw(c) + hdr + 2, plen - 2); // §5.5.1: reason must be valid UTF-8
+}
+
+// A CLOSE frame body is either empty, or a 2-byte code optionally followed by a
+// UTF-8 reason (RFC §5.5.1). A 1-byte body is malformed.
+static _Bool close_body_ok(ws_conn *c, const ws_frame_header *h, size_t hdr) {
+    size_t plen = (size_t)h->payload_len;
+    if (plen == 0) {
+        return true; // no code: allowed
+    }
+    if (plen == 1) {
+        return false; // RFC §5.5.1: a 1-byte close payload is invalid
+    }
+    return close_code_reason_ok(c, hdr, plen);
+}
+
+// CLOSE: validate the body, capture the peer's code (if any), drive the
+// lifecycle (R6a), emit (S11). A malformed body fails the connection (1007/1002).
 static ws_event_type on_close(ws_conn *c, const ws_frame_header *h, size_t hdr, ws_event *ev) {
+    if (!close_body_ok(c, h, hdr)) {
+        return fail(c, ev);
+    }
     size_t plen = (size_t)h->payload_len;
     if (plen >= 2) {
         c->close_code = (uint16_t)((raw(c)[hdr] << 8) | raw(c)[hdr + 1]);

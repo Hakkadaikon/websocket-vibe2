@@ -175,6 +175,63 @@ static void test_drv_bad_utf8(void) {
     check_latched(&c);
 }
 
+// RFC §7.4.1 / §5.5.1: a reserved/out-of-range close code or a malformed body
+// fails the connection instead of emitting CLOSE.
+static void test_drv_close_reserved_code(void) {
+    ws_conn c;
+    uint8_t mb[256];
+    open_server(&c, mb, sizeof mb);
+    uint8_t body[2] = {0x03, 0xED}; // 1005 (reserved, not sendable)
+    uint8_t f[32];
+    size_t n = mk_frame(f, true, WS_OP_CLOSE, true, body, 2);
+    ws_conn_recv(&c, f, n);
+    check_latched(&c);
+}
+
+static void test_drv_close_one_byte(void) {
+    ws_conn c;
+    uint8_t mb[256];
+    open_server(&c, mb, sizeof mb);
+    uint8_t body[1] = {0x03}; // 1-byte body is malformed (§5.5.1)
+    uint8_t f[32];
+    size_t n = mk_frame(f, true, WS_OP_CLOSE, true, body, 1);
+    ws_conn_recv(&c, f, n);
+    check_latched(&c);
+}
+
+static void test_drv_close_bad_reason(void) {
+    ws_conn c;
+    uint8_t mb[256];
+    open_server(&c, mb, sizeof mb);
+    uint8_t body[4] = {0x03, 0xE8, 0xC0, 0x80}; // 1000 + overlong UTF-8 reason
+    uint8_t f[32];
+    size_t n = mk_frame(f, true, WS_OP_CLOSE, true, body, 4);
+    ws_conn_recv(&c, f, n);
+    check_latched(&c);
+}
+
+// An empty body and a valid code+reason both produce a normal CLOSE.
+static void test_drv_close_empty_and_reason(void) {
+    ws_conn c1;
+    uint8_t mb1[256];
+    open_server(&c1, mb1, sizeof mb1);
+    uint8_t f1[32];
+    size_t n1 = mk_frame(f1, true, WS_OP_CLOSE, true, NULL, 0); // empty body
+    ws_conn_recv(&c1, f1, n1);
+    ws_event ev;
+    CHECK(ws_conn_poll(&c1, &ev) == WS_EV_CLOSE, "empty close body -> CLOSE");
+
+    ws_conn c2;
+    uint8_t mb2[256];
+    open_server(&c2, mb2, sizeof mb2);
+    uint8_t body[5] = {0x03, 0xE8, 'b', 'y', 'e'}; // 1000 + "bye"
+    uint8_t f2[32];
+    size_t n2 = mk_frame(f2, true, WS_OP_CLOSE, true, body, 5);
+    ws_conn_recv(&c2, f2, n2);
+    CHECK(ws_conn_poll(&c2, &ev) == WS_EV_CLOSE, "code+valid reason -> CLOSE");
+    CHECK(ev.close_code == 1000, "close code 1000 captured");
+}
+
 // Server builds an unmasked frame; parse it back and compare payload (roundtrip).
 static void test_drv_send_message(void) {
     ws_conn c;
