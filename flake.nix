@@ -19,6 +19,17 @@
             ${./src}/stream.c ${./src}/io_posix.c \
             ${./example}/echo_server.c -o $out/bin/echo-server
         '';
+        # Same server with the trace aspect woven in (-DWS_DEBUG + trace.c).
+        # echo-server above stays no-op / zero-overhead.
+        echo-server-debug = pkgs.runCommand "echo-server-debug" { nativeBuildInputs = [ pkgs.clang ]; } ''
+          mkdir -p $out/bin
+          clang -std=c23 -ffreestanding -nostdlib -fno-builtin -Wall -Wextra -Werror \
+            -O2 -DWS_DEBUG -static -I${./include} \
+            ${./src}/mem.c ${./src}/mask.c ${./src}/frame.c ${./src}/sha1.c \
+            ${./src}/base64.c ${./src}/handshake.c ${./src}/lifecycle.c ${./src}/utf8.c \
+            ${./src}/stream.c ${./src}/io_posix.c ${./src}/trace.c \
+            ${./example}/echo_server.c -o $out/bin/echo-server-debug
+        '';
         default = echo-server;
       });
 
