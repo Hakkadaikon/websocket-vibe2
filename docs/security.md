@@ -17,48 +17,30 @@ API の使い方は [`../README.md`](../README.md)、開発手順は [`developme
 ループエンジニアリングで、自然言語の仕様を段階的に厳密化し、最後に実装テストへ落とす。
 各段の成果物（`spec/*.tla`・`spec/*.feature`・C テスト）はソースから再生成し、手編集しない。
 
-```
-  元仕様（RFC 6455 / 自然言語）
-        |
-        |  [0] 抽出ループ：規範文を全件走査 → 要件候補を出し切る
-        |      トレーサビリティ表（条項 → 要件 → 形式手法 → テスト）で
-        |      空欄＝抽出漏れ を可視化（過剰抽出は安全・漏れは危険）
-        v
-  spec/REQUIREMENTS.md（EARS 要求 R1..R12 + ドメインモデル）
-        |
-        |  [1] 外ループ：EARS の各節 → TLA+ の Next disjunct / Inv
-        v
-  spec/WsLifecycle.tla   spec/WsStream.tla   （+ .cfg）
-        |
-        |  [2] 中ループ：設計を検査し、検査の強さも検証する
-        |
-        +--> TLC model-check ----------- No error --------+
-        |       |                                         |
-        |       | 反例（Inv 違反）                        | 緑（設計は不変条件を守る）
-        |       v                                         |
-        |    [3] 内ループ                                 |
-        |    trace_to_gherkin.py                          |
-        |       |  TLC トレース → Gherkin                 |
-        |       v                                         |
-        |    spec/*.feature（NEGATIVE: 起きてはならない例）|
-        |       |                                         |
-        |       +--> 設計を直して [1]/[2] へ戻す <--------+
-        |                                                 |
-        +--> mutation oracle（tla_mutate_oracle.py）      |
-                survivor が出たら Inv が弱い → 締めて再検査 |
-                                                          |
-                            設計が固まったら、正常系 EARS を
-                            .feature の POSITIVE シナリオに追加
-                                                          v
-                                          spec/*.feature（機械形式）
-                                                          |
-            [Gherkin → C テスト]  feature_to_c.py --map spec/bdd_map.json
-                                                          |
-                                          build/generated_bdd.c（CHECK 列）
-                                                          |
-                            test/bdd_main.c が 1 TU でリンク（just bdd）
-                                                          v
-                                  実装に当てて実行：正しい実装で緑 / 壊すと赤
+```mermaid
+flowchart TD
+    SPEC["元仕様（RFC 6455 / 自然言語）"]
+    REQ["spec/REQUIREMENTS.md<br/>EARS 要求 R1..R12 + ドメインモデル"]
+    TLA["spec/WsLifecycle.tla / WsStream.tla（+ .cfg）"]
+    TLC{"TLC model-check"}
+    MUT{"mutation oracle<br/>tla_mutate_oracle.py"}
+    INNER["内ループ trace_to_gherkin.py<br/>TLC トレース → Gherkin"]
+    FNEG["spec/*.feature<br/>NEGATIVE: 起きてはならない例"]
+    FPOS["spec/*.feature（機械形式）<br/>+ 正常系 POSITIVE シナリオ"]
+    GENC["feature_to_c.py --map spec/bdd_map.json<br/>→ build/generated_bdd.c（CHECK 列）"]
+    RUN["test/bdd_main.c が 1 TU でリンク（just bdd）<br/>実装に当てて実行：正しい実装で緑 / 壊すと赤"]
+
+    SPEC -->|"[0] 抽出ループ：規範文を全件走査し要件を出し切る<br/>トレーサビリティ表で空欄＝漏れを可視化"| REQ
+    REQ -->|"[1] 外ループ：EARS の各節 → Next disjunct / Inv"| TLA
+    TLA -->|"[2] 中ループ"| TLC
+    TLA -->|"[2] 中ループ"| MUT
+    TLC -->|"反例（Inv 違反）"| INNER
+    INNER --> FNEG
+    FNEG -->|"設計を直す"| TLA
+    MUT -->|"survivor＝Inv が弱い → 締めて再検査"| TLA
+    TLC -->|"No error（設計が固まる）"| FPOS
+    FPOS -->|"Gherkin → C テスト"| GENC
+    GENC --> RUN
 ```
 
 実装の数学的核（マスキング・長さ・UTF-8 など）は別系統で **Lean 4（`proofs/`）** が証明し、
