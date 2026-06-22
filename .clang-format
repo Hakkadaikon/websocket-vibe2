@@ -6,3 +6,6 @@ ColumnLimit: 100
 AllowShortFunctionsOnASingleLine: None
 AllowShortIfStatementsOnASingleLine: false
 PointerAlignment: Right
+# Keep #include order as written: test/test.c composes cases/*.c in run_tests
+# order, not alphabetically. No existing file relies on auto-sorting.
+SortIncludes: Never

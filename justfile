@@ -25,10 +25,10 @@ lint:
     clang-tidy src/trace.c -- {{cflags}} -DWS_DEBUG
 
 fmt:
-    clang-format --dry-run --Werror src/*.c include/ws/*.h test/*.c bench/*.c example/*.c
+    clang-format --dry-run --Werror src/*.c include/ws/*.h test/*.c test/cases/*.c bench/*.c example/*.c
 
 fmt-fix:
-    clang-format -i src/*.c include/ws/*.h test/*.c bench/*.c example/*.c
+    clang-format -i src/*.c include/ws/*.h test/*.c test/cases/*.c bench/*.c example/*.c
 
 # Cyclomatic complexity must stay <= 3 (C sources only; -l cpp skips the
 # Python test client living under example/).
