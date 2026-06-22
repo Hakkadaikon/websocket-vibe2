@@ -29,12 +29,37 @@ static void on_event(ws_io *io, ws_conn *c, const ws_event *ev) {
     echo_reply(io, c, ev);
 }
 
+// Exit via raw syscall (no libc). ws_serve only returns on a setup failure
+// (e.g. the port is already in use); exit with its status instead of running
+// off the end of _start, which is undefined behaviour (a segfault).
+static void sys_exit(int code) {
+    register long rax __asm__("rax") = 60;
+    register long rdi __asm__("rdi") = code;
+    __asm__ volatile("syscall" : : "r"(rax), "r"(rdi) : "memory");
+    __builtin_unreachable();
+}
+
+static void warn(const char *s) {
+    long n = 0;
+    while (s[n]) {
+        n++;
+    }
+    register long rax __asm__("rax") = 1; // write
+    register long rdi __asm__("rdi") = 2; // stderr
+    register long rsi __asm__("rsi") = (long)s;
+    register long rdx __asm__("rdx") = n;
+    __asm__ volatile("syscall" : "+r"(rax) : "r"(rdi), "r"(rsi), "r"(rdx) : "rcx", "r11", "memory");
+}
+
 #if defined(__x86_64__)
 __attribute__((force_align_arg_pointer))
 #endif
 void
 // NOLINTNEXTLINE(bugprone-reserved-identifier) — _start is the ELF entry point.
 _start(void) {
-    ws_serve(8080, WS_ROLE_SERVER, on_event);
-    __builtin_unreachable();
+    int rc = ws_serve(8080, WS_ROLE_SERVER, on_event);
+    if (rc != 0) {
+        warn("echo-server: ws_serve failed (port 8080 in use?)\n");
+    }
+    sys_exit(rc == 0 ? 0 : 1);
 }
