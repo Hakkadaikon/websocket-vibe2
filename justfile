@@ -21,6 +21,8 @@ test: build
 
 lint:
     clang-tidy {{srcs}} {{io_srcs}} test/test.c example/echo_server.c -- {{cflags}}
+    # trace.c is an empty TU without -DWS_DEBUG, so tidy it with the flag set.
+    clang-tidy src/trace.c -- {{cflags}} -DWS_DEBUG
 
 fmt:
     clang-format --dry-run --Werror src/*.c include/ws/*.h test/*.c bench/*.c example/*.c
@@ -41,6 +43,16 @@ example:
 # Run the echo server on :8080 (Ctrl-C to stop).
 example-run: example
     ./build/echo-server
+
+# Debug build: weave in the trace aspect (-DWS_DEBUG + src/trace.c). Default
+# builds stay no-op; this one writes one [ws] line per join point to stderr.
+debug:
+    mkdir -p build
+    {{cc}} {{cflags}} -DWS_DEBUG -static {{srcs}} {{io_srcs}} src/trace.c example/echo_server.c -o build/echo-server-debug
+
+# Run the debug server (trace goes to stderr).
+debug-run: debug
+    ./build/echo-server-debug
 
 # Throughput benchmark (masking + frame parse).
 bench:
