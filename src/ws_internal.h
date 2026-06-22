@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "ws/trace.h" // WS_TRACE_* join points (no-op unless -DWS_DEBUG)
+
 void *ws_memcpy(void *dst, const void *src, size_t n);
 void *ws_memset(void *dst, int c, size_t n);
 int ws_memcmp(const void *a, const void *b, size_t n);
