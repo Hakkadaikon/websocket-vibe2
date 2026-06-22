@@ -1,7 +1,7 @@
 // SHA-1 (RFC 3174), single-shot. Streams the message 64-byte block at a time
 // over a fixed 64-byte buffer, then appends the 0x80/zero/length padding.
 // Used only for the opening-handshake accept (RFC 6455 §4.2.2).
-#include "ws_internal.h"
+#include "../ws_internal.h"
 
 static uint32_t rotl32(uint32_t x, unsigned n) {
     return (x << n) | (x >> (32 - n));

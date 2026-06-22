@@ -2,7 +2,7 @@
 // P3/P4 (length forms), P5 (opcode class), P6 (control payload <= 125),
 // P7 (close-code wire validity).
 #include "ws/ws.h"
-#include "ws_internal.h"
+#include "../ws_internal.h"
 
 // P7: close codes 1000-1011 except the reserved 1004/1005/1006, plus the
 // application range 3000-4999, may appear on the wire (RFC 6455 §7.4.1).

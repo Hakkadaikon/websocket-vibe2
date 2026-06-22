@@ -7,7 +7,7 @@
 // message buffer, so the server costs WS_IO_MAX_CONNS * WS_MAX_MESSAGE
 // (default 64 * 64 KiB = 4 MiB) plus per-slot handshake scratch. No malloc.
 #include "ws/io.h"
-#include "ws_internal.h" // ws_memcmp
+#include "../ws_internal.h" // ws_memcmp
 
 #if !defined(__x86_64__)
 #error "io_posix supports x86-64 only"

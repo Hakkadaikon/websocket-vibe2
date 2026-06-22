@@ -3,7 +3,7 @@
 // and INV3 (CLOSED => frag NONE) are preserved by the RecvClose handler.
 // These are internal: the driver (stream.c) drives them; the old public
 // ws_conn_step / transition-event enum are gone (see ws_internal.h).
-#include "ws_internal.h"
+#include "../ws_internal.h"
 
 // Active == state in {OPEN, CLOSING} (frames processable). TLA+ `Active`.
 _Bool ws_lc_active(const ws_conn *c) {

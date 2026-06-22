@@ -1,6 +1,6 @@
 // freestanding mem primitives. clang may emit calls to these even with
 // -fno-builtin (e.g. struct copies), so we must define them ourselves.
-#include "ws_internal.h"
+#include "../ws_internal.h"
 
 void *ws_memcpy(void *dst, const void *src, size_t n) {
     unsigned char *d = dst;

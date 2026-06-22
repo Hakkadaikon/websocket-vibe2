@@ -6,7 +6,7 @@
 // Buffer layout in msg_buf: [0, msg_len) = reassembled message so far,
 // [msg_len, msg_len+rx_len) = unparsed raw receive bytes. Invariant SINV1:
 // msg_len + rx_len <= msg_cap always.
-#include "ws_internal.h"
+#include "../ws_internal.h"
 
 uint8_t ws_client_mask_key[4]; // caller fills with fresh random bytes per frame.
 

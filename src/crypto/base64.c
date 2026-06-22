@@ -1,6 +1,6 @@
 // Base64 encode, standard alphabet with padding (RFC 4648). Writes no NUL.
 // Used for Sec-WebSocket-Accept (RFC 6455 §4.2.2).
-#include "ws_internal.h"
+#include "../ws_internal.h"
 
 static const char kB64[64] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
