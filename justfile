@@ -82,10 +82,15 @@ verify: verify-design verify-proofs
 # of scope (they stay in test/test.c). Usage: just bdd spec/Foo.feature
 bdd FEATURE:
     mkdir -p build
-    python3 "${LOOPENG_HOME:-$HOME/.config/loopeng}/bin/feature_to_c.py" {{FEATURE}} > build/generated_bdd.c
+    python3 "${LOOPENG_HOME:-$HOME/.config/loopeng}/bin/feature_to_c.py" --map spec/bdd_map.json {{FEATURE}} > build/generated_bdd.c
     {{cc}} {{cflags}} -static {{srcs}} test/bdd_main.c \
         -DBDD_GENERATED='"'"$(pwd)/build/generated_bdd.c"'"' -o build/bdd
     ./build/bdd && echo "BDD PASS"
 
-# Everything CI cares about.
+# Fast gate: formatting, complexity, lint, and the self-checking tests.
 check: fmt ccn lint test
+
+# Full CI gate: the fast checks plus both formal-verification layers (TLA+
+# design model-check and Lean proofs). This is what CI should enforce so the
+# three-layer verification is never silently skipped.
+ci: check verify
