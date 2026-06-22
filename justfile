@@ -20,14 +20,23 @@ lint:
     clang-tidy {{srcs}} test/test.c -- {{cflags}}
 
 fmt:
-    clang-format --dry-run --Werror src/*.c include/*.h test/*.c bench/*.c
+    clang-format --dry-run --Werror src/*.c include/*.h test/*.c bench/*.c example/*.c
 
 fmt-fix:
-    clang-format -i src/*.c include/*.h test/*.c bench/*.c
+    clang-format -i src/*.c include/*.h test/*.c bench/*.c example/*.c
 
 # Cyclomatic complexity must stay <= 3.
 ccn:
-    lizard -C 3 -w src include
+    lizard -C 3 -w src include example
+
+# Build the echo server example (freestanding, links the SDK).
+example:
+    mkdir -p build
+    {{cc}} {{cflags}} -static {{srcs}} example/echo_server.c -o build/echo-server
+
+# Run the echo server on :8080 (Ctrl-C to stop).
+example-run: example
+    ./build/echo-server
 
 # Throughput benchmark (masking + frame parse).
 bench:
