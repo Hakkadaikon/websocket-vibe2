@@ -258,6 +258,7 @@ static ws_slot *slot_by_conn(ws_io *io, const ws_conn *c) {
 }
 
 static void slot_close(ws_io *io, ws_slot *s) {
+    WS_TRACE_IO("close", s->fd, -1);
     (void)syscall6(SYS_epoll_ctl, io->epoll_fd, EPOLL_CTL_DEL, s->fd, 0, 0, 0);
     sys_close(s->fd);
     s->used = false;
@@ -296,11 +297,13 @@ static void on_accept(ws_io *io) {
     }
     ws_slot *s = alloc_slot(io);
     if (s == NULL) {
+        WS_TRACE_IO("reject", (int)cfd, -1);
         sys_close((int)cfd); // pool full: refuse
         return;
     }
     *s = (ws_slot){.fd = (int)cfd, .used = true};
     (void)epoll_add(io->epoll_fd, (int)cfd);
+    WS_TRACE_IO("accept", (int)cfd, -1);
 }
 
 // ---- per-event drain (post-OPEN) ----
@@ -342,6 +345,7 @@ static int finish_handshake(ws_io *io, ws_slot *s, long body_at) {
     ws_conn_init(&s->conn, io->role, s->msg_buf, sizeof s->msg_buf);
     ws_conn_open(&s->conn);
     s->open = true;
+    WS_TRACE_IO("handshake", s->fd, -1);
     unsigned long off = (unsigned long)body_at + 4; // past "\r\n\r\n"
     return feed(io, s, s->hsbuf + off, s->hslen - off);
 }
