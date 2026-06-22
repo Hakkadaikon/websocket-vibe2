@@ -31,6 +31,12 @@ int ws_memcmp(const void *a, const void *b, size_t n) {
 }
 
 // Aliases the compiler/linker expects by these exact names.
-void *memcpy(void *dst, const void *src, size_t n) { return ws_memcpy(dst, src, n); }
-void *memset(void *dst, int c, size_t n) { return ws_memset(dst, c, n); }
-int memcmp(const void *a, const void *b, size_t n) { return ws_memcmp(a, b, n); }
+void *memcpy(void *dst, const void *src, size_t n) {
+    return ws_memcpy(dst, src, n);
+}
+void *memset(void *dst, int c, size_t n) {
+    return ws_memset(dst, c, n);
+}
+int memcmp(const void *a, const void *b, size_t n) {
+    return ws_memcmp(a, b, n);
+}

@@ -70,6 +70,7 @@ void run_tests(void);
 __attribute__((force_align_arg_pointer))
 #endif
 void
+// NOLINTNEXTLINE(bugprone-reserved-identifier) — _start is the mandatory ELF entry point.
 _start(void) {
     run_tests();
     sys_exit(ws_test_failures == 0 ? 0 : 1);
