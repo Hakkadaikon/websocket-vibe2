@@ -1,3 +1,5 @@
 /build/
 result
 /proofs/WsProto/.lake/
+/spec/states/
+/FORMAL_VERIFICATION_RETROSPECTIVE.md
