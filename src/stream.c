@@ -64,11 +64,16 @@ static ws_event_type fail(ws_conn *c, ws_event *ev) {
     c->frag = WS_FRAG_NONE;
     c->msg_len = 0;
     ev->type = WS_EV_ERROR;
+    WS_TRACE_EVENT(WS_EV_ERROR, 0, 0);
     return WS_EV_ERROR;
 }
 
 static ws_event_type emit(ws_event *ev, ws_event_type t) {
     ev->type = t;
+    // NONE means "nothing to report"; trace only real events to avoid noise.
+    if (t != WS_EV_NONE) {
+        WS_TRACE_EVENT(t, ev->len, ev->close_code);
+    }
     return t;
 }
 
