@@ -1,0 +1,10 @@
+name = "WsProto"
+version = "0.1.0"
+defaultTargets = ["wsproto"]
+
+[[lean_lib]]
+name = "WsProto"
+
+[[lean_exe]]
+name = "wsproto"
+root = "Main"
