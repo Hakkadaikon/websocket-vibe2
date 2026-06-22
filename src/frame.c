@@ -1,7 +1,34 @@
 // Frame header parse/build (RFC 6455 §5.2). Verified core: Lean WsProto.Basic
-// P3/P4 (length forms), P5 (opcode class), P6 (control payload <= 125).
+// P3/P4 (length forms), P5 (opcode class), P6 (control payload <= 125),
+// P7 (close-code wire validity).
 #include "ws.h"
 #include "ws_internal.h"
+
+// P7: close codes 1000-1011 except the reserved 1004/1005/1006, plus the
+// application range 3000-4999, may appear on the wire (RFC 6455 §7.4.1).
+// 1015 is outside 1000-1011 so it is excluded automatically.
+static _Bool in_range(uint16_t c, uint16_t lo, uint16_t hi) {
+    return (_Bool)(c >= lo && c <= hi);
+}
+
+// The three reserved/internal codes carved out of the 1000-1011 block.
+static _Bool close_reserved(uint16_t c) {
+    return (_Bool)(c == 1004 || c == 1005 || c == 1006);
+}
+
+static _Bool close_protocol_ok(uint16_t code) {
+    if (!in_range(code, 1000, 1011)) {
+        return false;
+    }
+    return (_Bool)!close_reserved(code);
+}
+
+_Bool ws_close_code_sendable(uint16_t code) {
+    if (close_protocol_ok(code)) {
+        return true;
+    }
+    return in_range(code, 3000, 4999);
+}
 
 // P5: 0x0/0x1/0x2 data, 0x8/0x9/0xA control, else reserved. Total.
 // Table over the 4-bit opcode space keeps this branch-free (CCN 1).
