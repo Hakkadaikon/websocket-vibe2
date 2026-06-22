@@ -73,5 +73,18 @@ verify-proofs:
 # Both formal layers.
 verify: verify-design verify-proofs
 
+# Run a TLA+-derived .feature as an executable test against the implementation.
+# feature_to_c.py translates the machine-generated Gherkin (the form
+# trace_to_gherkin.py emits: `When <Action>` / `Then <var> becomes <value>`)
+# into CHECK assertions that drive the verified ws_lc_* state machine, then
+# links them with the freestanding harness. Hand-written prose features are out
+# of scope (they stay in test/test.c). Usage: just bdd spec/Foo.feature
+bdd FEATURE:
+    mkdir -p build
+    python3 "${LOOPENG_HOME:-$HOME/.config/loopeng}/bin/feature_to_c.py" {{FEATURE}} > build/generated_bdd.c
+    {{cc}} {{cflags}} -static {{srcs}} test/bdd_main.c \
+        -DBDD_GENERATED='"'"$(pwd)/build/generated_bdd.c"'"' -o build/bdd
+    ./build/bdd && echo "BDD PASS"
+
 # Everything CI cares about.
 check: fmt ccn lint test
