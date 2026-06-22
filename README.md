@@ -139,6 +139,7 @@ nix develop
 |----------|------|
 | `just build` | テストバイナリをビルド |
 | `just test` | セルフチェックテストを実行（exit 0 が全 CHECK 通過） |
+| `just bdd <feature>` | TLA+ 由来の機械形式 `.feature` を実装に当てて実行 |
 | `just lint` | clang-tidy |
 | `just fmt` | clang-format の差分チェック |
 | `just ccn` | 循環的複雑度を検査（全関数 CCN ≤ 3） |
