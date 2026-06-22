@@ -25,6 +25,21 @@
 - [ ] S11. bench.c(mask/parse スループット)+ just bench
 - [ ] S12. CCN≤3 / clang-tidy / clang-format 全緑、README
 
+## driver 層 (WsStream) TDD タスク
+
+- [x] D1. lifecycle.c を内部化: ws_lc_* を ws_internal.h に宣言、旧公開API(ws_conn_step/旧enum)削除
+- [x] D2. stream.c: ws_conn_init/open/recv (SINV1) — Red→Green
+- [x] D3. stream.c: ws_conn_poll 単一TEXT/incremental(S3)/PING/CLOSE
+- [x] D4. フラグメント結合 TEXT+CONT (S4-S6, SINV5)、区画移動
+- [x] D5. エラー経路 interleave/stray/too-big/illegal/unmasked → ERROR latched (S7-S9,S13,S14,SINV8)
+- [x] D6. UTF-8 検証 (RFC 8.1) → ERROR
+- [x] D7. ws_send_message/pong/close (roundtrip)
+- [x] D8. 旧 lifecycle テストを内部API向けに書き直し
+- [x] D9. justfile srcs に stream.c、echo_server.c 書き直し、実機 echo 確認
+- [x] D10. 全チェック緑 (fmt/ccn/lint/test)
+  - SINV8 mutation: fail() の reset を外すと SINV8 テスト 6 件が落ちることを確認(ハーネス健全)。
+  - poll の S9(too-big)は co-located buffer では recv の S2(SINV1)が先に弾くため到達不能 → 防御コード。
+
 ## レビュー欄
 
 全タスク完了。三層検証 + freestanding C23 実装が揃った。
