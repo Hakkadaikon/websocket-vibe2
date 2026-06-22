@@ -61,30 +61,88 @@ int ws_handshake_accept(const uint8_t *key, size_t key_len, uint8_t out[28]);
 // ---- UTF-8 validation (RFC 6455 §8.1) — Lean P8 ----
 _Bool ws_utf8_valid(const uint8_t *data, size_t len);
 
-// ---- connection state machine (TLA+ WsLifecycle) ----
+// ============================================================================
+//  High-level sans-I/O driver
+//  Feed received bytes with ws_conn_recv, drain semantic events with
+//  ws_conn_poll, build outbound frames with ws_send_*. No I/O, no allocation:
+//  the caller owns the socket and the message buffer. The connection lifecycle
+//  (CONNECTING/OPEN/CLOSING/CLOSED) and fragment reassembly are verified in
+//  TLA+ (spec/WsStream). The opening HTTP upgrade is the caller's job; use
+//  ws_handshake_accept and start the driver once the socket is OPEN.
+// ============================================================================
+
+typedef enum { WS_ROLE_SERVER, WS_ROLE_CLIENT } ws_role;
+
 typedef enum { WS_CONNECTING, WS_OPEN, WS_CLOSING, WS_CLOSED } ws_state;
 typedef enum { WS_FRAG_NONE, WS_FRAG_TEXT, WS_FRAG_BIN } ws_frag;
 
-typedef struct {
-    ws_state state;
-    ws_frag frag;
-    _Bool sent_close;
-    _Bool rcvd_close;
-} ws_conn;
-
-// Events driving the machine (one per TLA+ Next disjunct).
+// Semantic events surfaced by ws_conn_poll.
 typedef enum {
-    WS_EV_HANDSHAKE,   // CONNECTING -> OPEN
-    WS_EV_SEND_CLOSE,  // OPEN -> CLOSING
-    WS_EV_RECV_CLOSE,  // -> CLOSED (reply-on-receive)
-    WS_EV_START_FRAG,  // begin fragmented data message
-    WS_EV_FINISH_FRAG, // FIN=1 completes message
+    WS_EV_NONE = 0, // queue drained / more bytes needed
+    WS_EV_MESSAGE,  // a complete TEXT or BIN message (data/len; opcode in 'op')
+    WS_EV_PING,     // a ping (data/len = payload); reply with ws_send_pong
+    WS_EV_PONG,     // a pong (informational)
+    WS_EV_CLOSE,    // peer close (close_code set); reply with ws_send_close
+    WS_EV_ERROR,    // protocol violation; the connection must be closed
+} ws_event_type;
+
+typedef struct {
+    ws_event_type type;
+    ws_opcode op;          // for WS_EV_MESSAGE: WS_OP_TEXT or WS_OP_BIN
+    const uint8_t *data;   // payload (into the caller's message buffer)
+    size_t len;            // payload length
+    uint16_t close_code;   // for WS_EV_CLOSE (0 if peer sent none)
 } ws_event;
 
-void ws_conn_init(ws_conn *c);
-// Apply an event. Returns 0 on a legal transition, negative ws_status if the
-// event is illegal in the current state (e.g. a frame while CONNECTING/CLOSED).
-int ws_conn_step(ws_conn *c, ws_event ev, ws_frag start_type);
+// Connection state. Fields are internal — declared here only so the caller can
+// stack-allocate it. Do not read/write them directly; use the functions.
+typedef struct {
+    ws_state state;
+    ws_frag frag;          // in-flight message type (WS_FRAG_NONE between msgs)
+    ws_role role;
+    _Bool sent_close;
+    _Bool rcvd_close;
+    uint8_t *msg_buf;      // caller-owned: holds reassembled message + scratch
+    size_t msg_cap;
+    size_t msg_len;        // bytes of the in-flight message assembled so far
+    size_t rx_len;         // unparsed raw bytes buffered after msg_len
+    uint16_t close_code;   // close code from the peer's CLOSE frame
+    _Bool failed;          // a protocol error latched the connection to ERROR
+} ws_conn;
+
+// Initialize a server/client connection. msg_buf (msg_cap bytes) is borrowed
+// for the connection's lifetime: it holds both the reassembled message and the
+// raw receive scratch. WS_MAX_MESSAGE is a sensible default cap.
+void ws_conn_init(ws_conn *c, ws_role role, uint8_t *msg_buf, size_t msg_cap);
+
+// Mark the upgrade complete (CONNECTING -> OPEN). Call after the HTTP 101.
+void ws_conn_open(ws_conn *c);
+
+// Feed received bytes into the connection. Copies into msg_buf scratch. Returns
+// the bytes accepted, or WS_ERR_TOO_SMALL if they would overflow msg_cap.
+int ws_conn_recv(ws_conn *c, const uint8_t *bytes, size_t len);
+
+// Pop the next semantic event. Returns ev->type (also the function result for
+// convenience). WS_EV_NONE when no complete frame is buffered. Drives the
+// verified state machine internally (close handshake, fragment assembly).
+ws_event_type ws_conn_poll(ws_conn *c, ws_event *ev);
+
+// ---- outbound frame builders (write into the caller's buffer) ----
+// All return the number of bytes written into out, or 0 on failure (buffer too
+// small, or illegal in the current state). Server frames are unmasked, client
+// frames are masked (RFC 6455 §5.1); the mask key is drawn from `mask_key`.
+size_t ws_send_message(ws_conn *c, ws_opcode op, const uint8_t *payload, size_t len,
+                       uint8_t *out, size_t cap);
+size_t ws_send_pong(ws_conn *c, const uint8_t *payload, size_t len, uint8_t *out, size_t cap);
+size_t ws_send_close(ws_conn *c, uint16_t code, uint8_t *out, size_t cap);
+
+// Client masking key source. Servers ignore it. The caller sets this to fresh
+// random bytes per frame (the SDK does no I/O, so it cannot gather entropy).
+extern uint8_t ws_client_mask_key[4];
+
+#ifndef WS_MAX_MESSAGE
+#define WS_MAX_MESSAGE 65536
+#endif
 
 // ---- status codes (negative returns) ----
 typedef enum {
