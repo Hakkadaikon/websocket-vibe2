@@ -44,10 +44,11 @@ bench:
     {{cc}} {{cflags}} -static {{srcs}} bench/bench.c -o build/bench
     ./build/bench
 
-# Re-model-check the TLA+ design (state machine, INV1..INV6).
+# Re-model-check the TLA+ designs (lifecycle INV1..6, streaming SINV1..8).
 verify-design:
     mkdir -p "${TMPDIR:-/tmp}/tla"
     cd spec && _JAVA_OPTIONS="-Djava.io.tmpdir=${TMPDIR:-/tmp}/tla" tlc -config WsLifecycle.cfg WsLifecycle.tla
+    cd spec && _JAVA_OPTIONS="-Djava.io.tmpdir=${TMPDIR:-/tmp}/tla" tlc -config WsStream.cfg WsStream.tla
 
 # Re-check the Lean proofs (P1..P8) behind the byte/bit-level code.
 verify-proofs:

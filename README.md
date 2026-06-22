@@ -22,18 +22,73 @@ libc に依存しない。
 
 ## 公開 API
 
-すべて `include/ws.h` で宣言する。
+すべて `include/ws/ws.h` で宣言する（`#include "ws/ws.h"`）。
+
+### 高レベル driver（sans-I/O）
+
+受信バイトを供給し、意味イベントを取り出し、送信フレームを組み立てる。
+I/O とメッセージバッファは呼び出し側が持つ。
+
+```c
+#include "ws/ws.h"
+
+ws_conn c;
+uint8_t msg_buf[WS_MAX_MESSAGE];
+ws_conn_init(&c, WS_ROLE_SERVER, msg_buf, sizeof msg_buf);
+ws_conn_open(&c);                 // HTTP 101 を返した後
+
+ws_conn_recv(&c, rx, rx_len);     // 受信した生バイトをコアに供給
+
+ws_event ev;
+while (ws_conn_poll(&c, &ev) != WS_EV_NONE) {
+    switch (ev.type) {
+    case WS_EV_MESSAGE: /* ev.data / ev.len / ev.op */ break;
+    case WS_EV_PING:    /* ws_send_pong で応答 */      break;
+    case WS_EV_CLOSE:   /* ev.close_code, ws_send_close */ break;
+    case WS_EV_ERROR:   /* プロトコル違反、接続を閉じる */  break;
+    default: break;
+    }
+}
+
+uint8_t out[4096];
+size_t n = ws_send_message(&c, WS_OP_TEXT, payload, payload_len, out, sizeof out);
+// n バイトを送信する（n == 0 は失敗）。
+```
+
+| 関数 | 役割 | 検証 |
+|------|------|------|
+| `ws_conn_init` / `ws_conn_open` | 接続を初期化し OPEN へ | TLA+ WsLifecycle |
+| `ws_conn_recv` | 受信バイトを供給（msg_buf に蓄積） | TLA+ SINV1 |
+| `ws_conn_poll` | 意味イベントを drain（フラグメント結合・close 処理込み） | TLA+ WsStream SINV1..8 |
+| `ws_send_message` / `ws_send_pong` / `ws_send_close` | 送信フレームを構築 | Lean P1..P7 |
+
+`ws_conn_poll` の不変条件はすべて TLA+ で検査済み。とりわけ、プロトコル違反で
+`failed` をラッチした瞬間に組み立て中メッセージを破棄する（SINV8）という設計判断は、
+mutation テストが「破棄漏れ」を survivor として検出したことから導いた。
+
+### 低レベルプリミティブ
+
+driver を使わず、フレーム単位で直接扱うこともできる。
 
 | 関数 | 役割 | 検証 |
 |------|------|------|
 | `ws_mask` | ペイロードのマスク/アンマスク（同一演算） | Lean P1/P2 |
-| `ws_parse_header` | フレームヘッダを parse | Lean P3..P6 |
-| `ws_build_header` | フレームヘッダを serialize | Lean P3/P4 |
+| `ws_parse_header` / `ws_build_header` | フレームヘッダの parse / serialize | Lean P3..P6 |
 | `ws_classify_opcode` | opcode を data/control/reserved に分類 | Lean P5 |
 | `ws_close_code_sendable` | close コードの送出可否を判定 | Lean P7 |
 | `ws_handshake_accept` | `Sec-WebSocket-Accept` を計算 | RFC 6455 §4.2 |
 | `ws_utf8_valid` | UTF-8 列を検証 | Lean P8 |
-| `ws_conn_init` / `ws_conn_step` | 接続状態機械を駆動 | TLA+ INV1..INV6 |
+
+## example: echo サーバー
+
+`example/echo_server.c` は freestanding C23・raw syscall（x86-64）で TCP I/O を持つ
+WebSocket echo サーバー。フレーム処理は driver（`ws_conn_recv` / `ws_conn_poll` /
+`ws_send_*`）に委ね、example 側は I/O と HTTP ハンドシェイクだけを持つ。
+
+```sh
+nix build .#echo-server   # またはサンドボックス内では just example
+./result/bin/echo-server  # :8080 で待ち受ける
+```
 
 ## ビルドと開発
 
