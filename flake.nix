@@ -16,6 +16,7 @@
             -O2 -static -I${./include} \
             ${./src}/mem.c ${./src}/mask.c ${./src}/frame.c ${./src}/sha1.c \
             ${./src}/base64.c ${./src}/handshake.c ${./src}/lifecycle.c ${./src}/utf8.c \
+            ${./src}/stream.c ${./src}/io_posix.c \
             ${./example}/echo_server.c -o $out/bin/echo-server
         '';
         default = echo-server;

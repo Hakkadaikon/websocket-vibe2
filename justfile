@@ -4,6 +4,9 @@ cc := "clang"
 # freestanding: no libc, no hosted runtime. -O2 for realistic bench.
 cflags := "-std=c23 -ffreestanding -nostdlib -fno-builtin -Wall -Wextra -Werror -O2 -Iinclude"
 srcs := "src/mem.c src/mask.c src/frame.c src/handshake.c src/sha1.c src/base64.c src/utf8.c src/lifecycle.c src/stream.c"
+# io_posix.c (epoll runtime) links into the example but not the test binary
+# (its raw-syscall server would clash with the test harness's own _start).
+io_srcs := "src/io_posix.c"
 
 default: check
 
@@ -17,7 +20,7 @@ test: build
     ./build/test && echo "PASS"
 
 lint:
-    clang-tidy {{srcs}} test/test.c -- {{cflags}}
+    clang-tidy {{srcs}} {{io_srcs}} test/test.c example/echo_server.c -- {{cflags}}
 
 fmt:
     clang-format --dry-run --Werror src/*.c include/ws/*.h test/*.c bench/*.c example/*.c
@@ -32,7 +35,7 @@ ccn:
 # Build the echo server example (freestanding, links the SDK).
 example:
     mkdir -p build
-    {{cc}} {{cflags}} -static {{srcs}} example/echo_server.c -o build/echo-server
+    {{cc}} {{cflags}} -static {{srcs}} {{io_srcs}} example/echo_server.c -o build/echo-server
 
 # Run the echo server on :8080 (Ctrl-C to stop).
 example-run: example
