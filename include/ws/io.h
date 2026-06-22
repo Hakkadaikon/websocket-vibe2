@@ -36,11 +36,22 @@ typedef struct ws_io ws_io;
 // runtime after the handler returns.
 typedef void (*ws_io_handler)(ws_io *io, ws_conn *c, const ws_event *ev);
 
+// Which setup step failed (ws_serve return value, negated errno carried too).
+typedef enum {
+    WS_IO_ERR_SOCKET = -1, // socket() failed
+    WS_IO_ERR_BIND = -2,   // bind() failed (e.g. address already in use)
+    WS_IO_ERR_LISTEN = -3, // listen() failed
+    WS_IO_ERR_EPOLL = -4,  // epoll_create1()/epoll_ctl() failed
+} ws_io_error;
+
 // Run a WebSocket server on the given TCP port until a fatal error. Accepts and
 // multiplexes connections with epoll, performs each HTTP upgrade, then drives
-// the verified driver and calls `on_event` per event. Returns negative on a
-// setup failure (socket/bind/listen/epoll); otherwise loops forever.
+// the verified driver and calls `on_event` per event. On a setup failure
+// returns the matching ws_io_error (negative); otherwise loops forever.
 int ws_serve(uint16_t port, ws_role role, ws_io_handler on_event);
+
+// Human-readable text for a ws_serve setup-failure return. Static string.
+const char *ws_io_strerror(int rc);
 
 // Send helpers usable from the handler. They build the frame with ws_send_*
 // (server-unmasked / client-masked) and write it to the connection's socket.

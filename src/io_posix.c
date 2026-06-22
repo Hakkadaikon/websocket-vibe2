@@ -79,8 +79,8 @@ static uint16_t htons16(uint16_t v) {
     return (uint16_t)((v << 8) | (v >> 8));
 }
 
-// bind(0.0.0.0:port) then listen. Returns 0 on success.
-static int bind_listen(long fd, uint16_t port) {
+// bind(0.0.0.0:port). Returns 0 or WS_IO_ERR_BIND (e.g. address in use).
+static int do_bind(long fd, uint16_t port) {
     int one = 1;
     (void)syscall6(SYS_setsockopt, fd, SOL_SOCKET, SO_REUSEADDR, (long)&one, sizeof one, 0);
     struct sockaddr_in addr = {0};
@@ -88,17 +88,9 @@ static int bind_listen(long fd, uint16_t port) {
     addr.sin_port = htons16(port);
     addr.sin_addr = 0; // INADDR_ANY (0.0.0.0)
     if (syscall6(SYS_bind, fd, (long)&addr, sizeof addr, 0, 0, 0) < 0) {
-        return -1;
+        return WS_IO_ERR_BIND;
     }
-    return syscall6(SYS_listen, fd, 16, 0, 0, 0, 0) < 0 ? -1 : 0;
-}
-
-static int listen_socket(uint16_t port) {
-    long fd = syscall6(SYS_socket, AF_INET, SOCK_STREAM, 0, 0, 0, 0);
-    if (fd < 0) {
-        return (int)fd;
-    }
-    return bind_listen(fd, port) < 0 ? -1 : (int)fd;
+    return 0;
 }
 
 // epoll register/unregister of fd for EPOLLIN. Returns the syscall result.
@@ -416,19 +408,40 @@ static void run_loop(ws_io *io) {
     }
 }
 
-// Create the listen socket and epoll fd. Returns 0 on success; stores fds.
-static int io_open_fds(ws_io *io, uint16_t port) {
-    io->listen_fd = listen_socket(port);
-    io->epoll_fd = (int)syscall6(SYS_epoll_create1, 0, 0, 0, 0, 0, 0);
-    return (io->listen_fd | io->epoll_fd) < 0 ? -1 : 0; // either negative -> top bit set
+// bind then listen on an open socket. Returns 0 or the failing step's error.
+static int bind_then_listen(int fd, uint16_t port) {
+    int rc = do_bind(fd, port);
+    if (rc != 0) {
+        return rc;
+    }
+    return syscall6(SYS_listen, fd, 16, 0, 0, 0, 0) < 0 ? WS_IO_ERR_LISTEN : 0;
 }
 
-// Open fds + register the listener for EPOLLIN. 0 on success.
-static int io_setup(ws_io *io, uint16_t port) {
-    if (io_open_fds(io, port) != 0) {
-        return -1;
+// Create + bind + listen the server socket. Returns 0 or a ws_io_error step.
+static int open_listener(ws_io *io, uint16_t port) {
+    io->listen_fd = (int)syscall6(SYS_socket, AF_INET, SOCK_STREAM, 0, 0, 0, 0);
+    if (io->listen_fd < 0) {
+        return WS_IO_ERR_SOCKET;
     }
-    return epoll_add(io->epoll_fd, io->listen_fd) < 0 ? -1 : 0;
+    return bind_then_listen(io->listen_fd, port);
+}
+
+// Create the epoll fd and register the listener for EPOLLIN. 0 or WS_IO_ERR_EPOLL.
+static int open_epoll(ws_io *io) {
+    io->epoll_fd = (int)syscall6(SYS_epoll_create1, 0, 0, 0, 0, 0, 0);
+    if (io->epoll_fd < 0) {
+        return WS_IO_ERR_EPOLL;
+    }
+    return epoll_add(io->epoll_fd, io->listen_fd) < 0 ? WS_IO_ERR_EPOLL : 0;
+}
+
+// Full setup: listener then epoll. Returns 0 or the failing step's ws_io_error.
+static int io_setup(ws_io *io, uint16_t port) {
+    int rc = open_listener(io, port);
+    if (rc != 0) {
+        return rc;
+    }
+    return open_epoll(io);
 }
 
 int ws_serve(uint16_t port, ws_role role, ws_io_handler on_event) {
@@ -437,9 +450,23 @@ int ws_serve(uint16_t port, ws_role role, ws_io_handler on_event) {
     static ws_io io;
     io.role = role;
     io.on_event = on_event;
-    if (io_setup(&io, port) != 0) {
-        return -1;
+    int rc = io_setup(&io, port);
+    if (rc != 0) {
+        return rc;
     }
     run_loop(&io);
     return 0;
+}
+
+const char *ws_io_strerror(int rc) {
+    // rc is 0 or a ws_io_error in -1..-4; index by -rc.
+    static const char *const msg[] = {
+        "ok",
+        "socket() failed",
+        "bind() failed (port already in use?)",
+        "listen() failed",
+        "epoll setup failed",
+    };
+    unsigned idx = (rc <= 0 && rc >= WS_IO_ERR_EPOLL) ? (unsigned)(-rc) : 0;
+    return msg[idx];
 }

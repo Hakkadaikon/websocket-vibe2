@@ -58,8 +58,12 @@ void
 // NOLINTNEXTLINE(bugprone-reserved-identifier) — _start is the ELF entry point.
 _start(void) {
     int rc = ws_serve(8080, WS_ROLE_SERVER, on_event);
+    // ws_serve only returns on a setup failure; report which step and exit
+    // cleanly (running off _start would be UB — a segfault).
     if (rc != 0) {
-        warn("echo-server: ws_serve failed (port 8080 in use?)\n");
+        warn("echo-server: ");
+        warn(ws_io_strerror(rc));
+        warn("\n");
     }
     sys_exit(rc == 0 ? 0 : 1);
 }
