@@ -51,19 +51,63 @@ static void warn(const char *s) {
     __asm__ volatile("syscall" : "+r"(rax) : "r"(rdi), "r"(rsi), "r"(rdx) : "rcx", "r11", "memory");
 }
 
-#if defined(__x86_64__)
-__attribute__((force_align_arg_pointer))
-#endif
-void
-// NOLINTNEXTLINE(bugprone-reserved-identifier) — _start is the ELF entry point.
-_start(void) {
-    int rc = ws_serve(8080, WS_ROLE_SERVER, on_event);
+#define DEFAULT_PORT 8080
+
+// Fold one decimal digit into acc, or return >65535 to signal invalid input
+// (non-digit or overflow), which parse_port maps to 0.
+static unsigned long port_digit(unsigned long acc, char ch) {
+    if (ch < '0' || ch > '9') {
+        return 0x10000; // out of range -> invalid
+    }
+    return acc * 10 + (unsigned long)(ch - '0');
+}
+
+// Parse a base-10 port from a NUL-terminated string. Returns 0 (invalid) or the
+// port; out-of-range / non-digit yields 0 so the caller falls back to default.
+static uint16_t parse_port(const char *s) {
+    unsigned long v = 0;
+    for (long i = 0; s[i]; i++) {
+        v = port_digit(v, s[i]);
+        if (v > 65535) {
+            return 0;
+        }
+    }
+    return (uint16_t)v;
+}
+
+// Pick the port from argv[1] if present and valid, else DEFAULT_PORT. The stack
+// at _start holds [argc][argv[0]][argv[1]]...; sp[0]=argc, sp[1..]=argv.
+static uint16_t port_from_stack(const long *sp) {
+    long argc = sp[0];
+    if (argc < 2) {
+        return DEFAULT_PORT;
+    }
+    uint16_t p = parse_port((const char *)sp[2]); // sp[1]=argv[0], sp[2]=argv[1]
+    return p != 0 ? p : DEFAULT_PORT;
+}
+
+// Real entry: gets the initial stack pointer from the asm _start below.
+// Non-static so the asm `call ws_main` resolves to a stable symbol.
+void ws_main(const long *sp);
+void ws_main(const long *sp) {
+    uint16_t port = port_from_stack(sp);
+    int rc = ws_serve(port, WS_ROLE_SERVER, on_event);
     // ws_serve only returns on a setup failure; report which step and exit
-    // cleanly (running off _start would be UB — a segfault).
+    // cleanly (running off the entry would be UB — a segfault).
     if (rc != 0) {
         warn("echo-server: ");
         warn(ws_io_strerror(rc));
         warn("\n");
     }
     sys_exit(rc == 0 ? 0 : 1);
+}
+
+// ELF entry. At _start rsp points at argc; a C prologue would clobber it, so a
+// naked stub hands the original rsp to ws_main as its argument (System V: rdi).
+__attribute__((naked)) void
+// NOLINTNEXTLINE(bugprone-reserved-identifier) — _start is the ELF entry point.
+_start(void) {
+    __asm__ volatile("mov %rsp, %rdi\n\t"
+                     "and $-16, %rsp\n\t" // 16-byte align for the call
+                     "call ws_main");
 }

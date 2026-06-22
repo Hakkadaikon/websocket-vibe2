@@ -117,8 +117,13 @@ void _start(void) { ws_serve(8080, WS_ROLE_SERVER, on_event); }
 
 ```sh
 nix build .#echo-server   # またはサンドボックス内では just example
-./result/bin/echo-server  # :8080 で待ち受ける
+./result/bin/echo-server        # :8080 で待ち受ける（既定）
+./result/bin/echo-server 9090   # ポートを指定（引数が無効なら 8080）
 ```
+
+ポートが使用中なら起動せず、失敗した段階を `bind() failed (port already in use?)`
+のように stderr に出して終了する（segfault しない）。`ss -tlnp 'sport = :8080'` で
+占有プロセスを確認できる。
 
 ## ビルドと開発
 
