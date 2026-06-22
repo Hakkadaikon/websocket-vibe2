@@ -20,10 +20,10 @@ lint:
     clang-tidy {{srcs}} test/test.c -- {{cflags}}
 
 fmt:
-    clang-format --dry-run --Werror src/*.c include/*.h test/*.c bench/*.c example/*.c
+    clang-format --dry-run --Werror src/*.c include/ws/*.h test/*.c bench/*.c example/*.c
 
 fmt-fix:
-    clang-format -i src/*.c include/*.h test/*.c bench/*.c example/*.c
+    clang-format -i src/*.c include/ws/*.h test/*.c bench/*.c example/*.c
 
 # Cyclomatic complexity must stay <= 3.
 ccn:

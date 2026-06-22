@@ -12,7 +12,7 @@
 //   - one accept handles one client sequentially.
 //   - read buffers are fixed (handshake 2 KiB, frame 64 KiB).
 #include "../src/ws_internal.h" // ws_memcmp (SDK internal, linked in)
-#include "ws.h"
+#include "ws/ws.h"
 
 #if !defined(__x86_64__)
 #error "echo_server example supports x86-64 only"

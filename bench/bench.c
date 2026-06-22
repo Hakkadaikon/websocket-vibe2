@@ -2,7 +2,7 @@
 // Freestanding (no libc): own _start, raw write syscall, rdtsc timing, and a
 // hand-rolled uint->decimal printer. We report cycles/byte and cycles/frame —
 // rdtsc has no fixed frequency here, so cycles are the honest unit (no MiB/s).
-#include "ws.h"
+#include "ws/ws.h"
 
 #include <stddef.h>
 #include <stdint.h>

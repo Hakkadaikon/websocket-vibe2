@@ -1,5 +1,5 @@
 #include "../src/ws_internal.h"
-#include "ws.h"
+#include "ws/ws.h"
 
 #include "harness.h"
 

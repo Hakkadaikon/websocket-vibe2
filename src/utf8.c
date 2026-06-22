@@ -2,7 +2,7 @@
 // P8 (range soundness). The decode step mirrors Lean utf8DecodeStep 1:1 (lead
 // classify -> first-continuation guard -> tail continuations) so the bridge
 // vectors in test/test.c pin code <-> proof.
-#include "ws.h"
+#include "ws/ws.h"
 
 // Inclusive byte-range test (kept separate so the comparisons don't inflate the
 // cyclomatic complexity of the callers; CCN budget is <= 3).

@@ -1,7 +1,7 @@
 // Opening-handshake accept (RFC 6455 §4.2.2):
 //   accept = base64( sha1( key ++ GUID ) ), 28 base64 chars, no NUL.
 // A fixed stack buffer holds key++GUID — no allocation.
-#include "ws.h"
+#include "ws/ws.h"
 #include "ws_internal.h"
 
 // RFC 6455 §1.3 magic GUID, 36 chars (no NUL needed in the concatenation).

@@ -1,7 +1,7 @@
 // Frame header parse/build (RFC 6455 §5.2). Verified core: Lean WsProto.Basic
 // P3/P4 (length forms), P5 (opcode class), P6 (control payload <= 125),
 // P7 (close-code wire validity).
-#include "ws.h"
+#include "ws/ws.h"
 #include "ws_internal.h"
 
 // P7: close codes 1000-1011 except the reserved 1004/1005/1006, plus the

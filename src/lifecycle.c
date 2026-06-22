@@ -2,7 +2,7 @@
 // Next in spec/WsLifecycle.tla; the dispatch table mirrors the event enum.
 // Invariants INV1 (CLOSED iff both close bits) and INV3 (CLOSED => frag NONE)
 // are preserved by the RecvClose handler and checked in the bridge tests.
-#include "ws.h"
+#include "ws/ws.h"
 
 void ws_conn_init(ws_conn *c) {
     c->state = WS_CONNECTING;
