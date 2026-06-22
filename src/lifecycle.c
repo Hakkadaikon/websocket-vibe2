@@ -15,7 +15,9 @@ int ws_lc_handshake(ws_conn *c) {
     if (c->state != WS_CONNECTING) {
         return WS_ERR_ILLEGAL_STATE;
     }
+    int from = c->state;
     c->state = WS_OPEN;
+    WS_TRACE_STATE(from, c->state, "handshake");
     return WS_OK;
 }
 
@@ -24,8 +26,10 @@ int ws_lc_send_close(ws_conn *c) {
     if (c->state != WS_OPEN) {
         return WS_ERR_ILLEGAL_STATE;
     }
+    int from = c->state;
     c->sent_close = true;
     c->state = WS_CLOSING;
+    WS_TRACE_STATE(from, c->state, "send_close");
     return WS_OK;
 }
 
@@ -35,11 +39,13 @@ int ws_lc_recv_close(ws_conn *c) {
     if (!ws_lc_active(c)) {
         return WS_ERR_ILLEGAL_STATE;
     }
+    int from = c->state;
     c->rcvd_close = true;
     c->sent_close = true;
     c->state = WS_CLOSED;
     c->frag = WS_FRAG_NONE;
     c->msg_len = 0; // R6a: discard in-flight assembly (SINV2/SINV8).
+    WS_TRACE_STATE(from, c->state, "recv_close");
     return WS_OK;
 }
 
