@@ -11,14 +11,8 @@ libc に依存しない。
 このライブラリはバイト列の変換だけを担う。
 フレームの parse と build、マスキング、ハンドシェイクの accept 計算、close コードの判定、UTF-8 検証、接続状態機械の遷移である。
 
-## 三層検証
-
-正しさを三つの層で担保する。
-各層は別の道具で別の対象を保証し、機械変換では結線しない。
-
-- **設計（TLA+、`spec/`）**：接続状態機械の安全性を網羅検査する。CONNECTING/OPEN/CLOSING/CLOSED の遷移と close ハンドシェイクが不変条件 INV1..INV6 を保つことを、有限状態空間の全探索で確かめる。
-- **数学的核（Lean 4、`proofs/`）**：バイト列とビット演算レベルの性質 P1..P8 を証明する。マスキングが自己逆元であること（P1）、長さエンコードの往復と境界分類（P3/P4）、UTF-8 validator が accept する列が妥当な Unicode スカラ値であること（P8）などである。
-- **実装（TDD）**：各性質を C のテストベクタへ落とし、先に失敗させてから実装をモデルに合わせる。UTF-8 の検証コードは Lean の `utf8DecodeStep` と分岐を1対1で対応させ、橋渡しテストで証明と実装を固定している。
+正しさは TLA+（設計）・Lean 4（数学的核）・TDD（実装）の三層で担保している。
+詳細は [`docs/security.md`](docs/security.md) を参照。
 
 ## 公開 API
 
@@ -62,9 +56,8 @@ size_t n = ws_send_message(&c, WS_OP_TEXT, payload, payload_len, out, sizeof out
 | `ws_conn_poll` | 意味イベントを drain（フラグメント結合・close 処理込み） | TLA+ WsStream SINV1..8 |
 | `ws_send_message` / `ws_send_pong` / `ws_send_close` | 送信フレームを構築 | Lean P1..P7 |
 
-`ws_conn_poll` の不変条件はすべて TLA+ で検査済み。とりわけ、プロトコル違反で
-`failed` をラッチした瞬間に組み立て中メッセージを破棄する（SINV8）という設計判断は、
-mutation テストが「破棄漏れ」を survivor として検出したことから導いた。
+`ws_conn_poll` の不変条件はすべて TLA+ で検査済み（フェイルクローズの設計判断 SINV8 など、
+詳細は [`docs/security.md`](docs/security.md)）。
 
 ### 低レベルプリミティブ
 
@@ -125,55 +118,30 @@ nix build .#echo-server   # またはサンドボックス内では just example
 のように stderr に出して終了する（segfault しない）。`ss -tlnp 'sport = :8080'` で
 占有プロセスを確認できる。
 
-## ビルドと開発
-
-開発環境は Nix flake で固定する。
-
-```sh
-nix develop
-```
-
-`just` のコマンドで各タスクを実行する。
-
-| コマンド | 内容 |
-|----------|------|
-| `just build` | テストバイナリをビルド |
-| `just test` | セルフチェックテストを実行（exit 0 が全 CHECK 通過） |
-| `just bdd <feature>` | TLA+ 由来の機械形式 `.feature` を実装に当てて実行 |
-| `just lint` | clang-tidy |
-| `just fmt` | clang-format の差分チェック |
-| `just ccn` | 循環的複雑度を検査（全関数 CCN ≤ 3） |
-| `just bench` | マスキングとフレーム parse のスループット計測 |
-| `just debug` | トレース付きデバッグビルド（`build/echo-server-debug`） |
-| `just debug-run` | デバッグサーバを起動（トレースは stderr へ） |
-| `just verify-design` | TLA+ の状態機械をモデル検査（INV1..INV6） |
-| `just verify-proofs` | Lean の証明 P1..P8 を再検査 |
-| `just verify` | 形式検証の二層（design + proofs）をまとめて実行 |
-| `just check` | fmt/ccn/lint/test を一括実行 |
-
-`just bench` は rdtsc でサイクルを測り、`cycles/byte`（マスキング）と `cycles/frame`（parse）を出力する。
-rdtsc の周波数は環境依存なので、MiB/s ではなくサイクルを単位とする。
-
-## デバッグトレース（横断的関心事）
-
-デバッグログは AOP 的に分離している。メインロジックは join point（イベント発生・状態遷移・
-I/O ステップ）に 1 行の `WS_TRACE_*` を置くだけで、ログの整形と出力先は `src/trace.c`
-（アスペクト）に隔離する。`include/ws/trace.h` がマクロを定義する。
-
-- 通常ビルド: `WS_DEBUG` 未定義。`WS_TRACE_*` は `((void)0)` に展開され、バイナリに
-  一切痕跡が残らない（ゼロオーバーヘッド）。
-- デバッグビルド（`just debug` / `-DWS_DEBUG` + `src/trace.c`）: 各 join point が
-  stderr に 1 行出力する。
+## ディレクトリ構造
 
 ```text
-[ws] io accept fd=6 detail=-1
-[ws] state CONNECTING -> OPEN (handshake)
-[ws] io handshake fd=6 detail=-1
-[ws] event=MESSAGE len=5
-[ws] io close fd=6 detail=-1
+include/ws/        公開ヘッダ（ws.h / io.h / trace.h）
+src/               実装。依存レイヤー順（低 → 高）
+  util/              mem, mask        — 純粋ユーティリティ
+  crypto/            sha1, base64     — ハッシュ / エンコード
+  framing/           frame, handshake, utf8 — ワイヤフォーマット
+  session/           lifecycle, stream      — プロトコル状態機械
+  io/                io_posix         — epoll ランタイム（任意）
+  trace.c            横断的関心事のデバッグアスペクト
+  ws_internal.h      レイヤー横断の内部宣言
+spec/              TLA+ 設計モデル（WsLifecycle / WsStream）
+proofs/WsProto/    Lean 4 証明（P1..P8）
+test/              セルフチェックテスト（cases/ に用途別分割）
+example/           echo サーバー
+bench/             スループットベンチ
+docs/              開発手順・検証/健全性のドキュメント
 ```
 
-Nix では `nix build .#echo-server-debug`。通常の `echo-server` は no-op のまま。
+## ドキュメント
+
+- [`docs/development.md`](docs/development.md) — ビルド・テスト・デバッグの手順（`just` コマンド一覧、トレース）。
+- [`docs/security.md`](docs/security.md) — 三層検証と RFC 6455 セキュリティ性質の保証。
 
 ## ライセンス
 
